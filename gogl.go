@@ -1,21 +1,46 @@
 package gogl
 
 import (
+	"os"
 	"log"
 	"strings"
 	"runtime"
+	//"path/filepath"
+	"io/ioutil"
+	"errors"
+	"time"
 
 	"github.com/go-gl/gl/v4.5-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 )
+
+var (
+	// Watch list for hotloading shaders
+	LoadedShaders []ShaderFileInfo
+	LoadedPrograms []Program
+)
+
+type ShaderFileInfo struct {
+	FilePath string
+	LastModified time.Time
+}
+
+type Program struct {
+	ID ProgramID
+	ProgramName string
+	VertexShaderFilePath string
+	FragmentShaderFilePath string
+}
 
 type ShaderID uint32
 type ProgramID uint32
 type VAOID uint32
 type VBOID uint32
 
-
+// ------------------------------------------------------------------------------------------
 // [ Init functions ]
+
+/* Inits GL and GLFW */
 func Init(windowTitle string, width, height int) *glfw.Window {
 	runtime.LockOSThread()
 
@@ -32,7 +57,7 @@ func Init(windowTitle string, width, height int) *glfw.Window {
 	return window
 }
 
-// initGlfw initializes glfw and returns a Window to use.
+/* initializes glfw and returns a Window to use. */
 func InitGlfw(windowTitle string, width, height int) *glfw.Window {
 	if err := glfw.Init(); err != nil {
 		panic(err)
@@ -52,9 +77,11 @@ func InitGlfw(windowTitle string, width, height int) *glfw.Window {
 
 	return window
 }
-// [ / Init functions ]
 
+// [ / Init functions ]
+// ------------------------------------------------------------------------------------------
 // [ Main functions ]
+
 func Draw(window *glfw.Window, programID ProgramID, data []float32, dataType uint32) {
 	// dataType: gl.TRIANGLES
 
@@ -78,7 +105,7 @@ func Draw(window *glfw.Window, programID ProgramID, data []float32, dataType uin
 }
 
 // [ Main functions ]
-
+// ------------------------------------------------------------------------------------------
 // [ Makers ]
 
 func MakeVao(data []float32) (VAOID, VBOID) {
@@ -128,7 +155,7 @@ func BufferData(data []float32, target uint32, usage uint32) {
 }
 
 
-func MakeShader(shaderSourceCode string, shaderType uint32) ShaderID{
+func MakeShader(shaderSourceCode string, shaderType uint32) (ShaderID, error) {
 	// We need to convert the shaderSource from a Go string to 
 	// a C string. C strings need a null byte at the end, and
 	// they need to be freed after they are no longer needed
@@ -145,33 +172,115 @@ func MakeShader(shaderSourceCode string, shaderType uint32) ShaderID{
 	// Compile
 	gl.CompileShader(shaderId)
 
-	// Log error and stop execution if failed
-	CheckShaderCompileSuccess(ShaderID(shaderId), shaderSourceCode)
+	// Check for error
+	err := CheckShaderCompileSuccess(ShaderID(shaderId), shaderSourceCode)
+	if err != nil {
+		return 0, err
+	}
 
-	return ShaderID(shaderId)
+	return ShaderID(shaderId), nil
 }
 
-func MakeProgram(vertexShaderID ShaderID, fragmentShaderID ShaderID) ProgramID {
-	programID := ProgramID( gl.CreateProgram() )
+func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath string) (ProgramID, error) {
+	// Create shaders
+	vertexShaderID, err := LoadShader(vertexShaderPath, gl.VERTEX_SHADER)
+	if err != nil {
+		log.Println(err)
+		return 0, err
+	}
+	fragmentShaderID, err2 := LoadShader(fragmentShaderPath, gl.FRAGMENT_SHADER)
+	if err2 != nil {
+		log.Println(err2)
+		return 0, err
+	}
 
+	// Create program & link shaders
+	programID := ProgramID( gl.CreateProgram() )
 	AttachShader(programID, vertexShaderID)
 	AttachShader(programID, fragmentShaderID)
 	LinkProgram(programID)
 
 	// Log error and stop execution if failed
-	CheckProgramLinkSuccess(programID)
+	err = CheckProgramLinkSuccess(programID)
+	if err != nil {
+		panic(err)
+	}
 
 	// After linking, we can delete the shaders
 	gl.DeleteShader(uint32(vertexShaderID))
 	gl.DeleteShader(uint32(fragmentShaderID))
 
-	return programID
+	// Add program to watchlist so we can recreate it when one of the shaders
+	// needs to be recompiled
+	if programIsInWatchList(programName) == false {
+		LoadedPrograms = append(LoadedPrograms, Program{
+			ID: programID,
+			ProgramName: programName,
+			VertexShaderFilePath: vertexShaderPath,
+			FragmentShaderFilePath: fragmentShaderPath,
+		})
+	}
+
+	log.Println("Program " + programName + " compiled succesfully.")
+
+	return programID, nil
+}
+
+/* Hotloading shader interface for program */
+func ReloadProgram(programName string, changedShaderFiles []string) (ProgramID, error){
+	var currentProgramID ProgramID
+	var newProgramID ProgramID
+	var vertexShaderPath, fragmentShaderPath string
+	
+	// Find stored Program definition, and fetch shader file names
+	programFound := false
+	programIndex := 0
+	for i := range LoadedPrograms {
+		if LoadedPrograms[i].ProgramName == programName {
+			programName        = LoadedPrograms[i].ProgramName
+			currentProgramID   = LoadedPrograms[i].ID
+			vertexShaderPath   = LoadedPrograms[i].VertexShaderFilePath
+			fragmentShaderPath = LoadedPrograms[i].FragmentShaderFilePath
+			programFound       = true
+			programIndex       = i
+		}
+	}
+	if programFound == false {
+		return 0, errors.New("Could not find program " + programName)
+	}
+
+	// Check if any changed files are related to our program
+	needsRebuilding := false
+	for i := range changedShaderFiles {
+		if changedShaderFiles[i] == vertexShaderPath || changedShaderFiles[i] == fragmentShaderPath {
+			needsRebuilding = true
+			log.Println("Program " + programName + " needs rebuiding")
+			break
+		}
+	}
+
+	// Rebuild
+	if needsRebuilding {
+		var err error
+		newProgramID, err = MakeProgram(programName, vertexShaderPath, fragmentShaderPath)
+		if err != nil {
+			return 0, err
+		}
+
+		// Update programID in watchlist
+		LoadedPrograms[programIndex].ID = newProgramID
+		return newProgramID, nil
+	}
+
+	// Nothing has changed, return current ID
+	return currentProgramID, nil
 }
 
 // [/ Makers ]
+// ------------------------------------------------------------------------------------------
 // [ Status checkers ]
 
-func CheckProgramLinkSuccess(programID ProgramID){
+func CheckProgramLinkSuccess(programID ProgramID) error{
 	var success int32
 	gl.GetProgramiv(uint32(programID), gl.LINK_STATUS, &success)
 	if success == gl.FALSE {
@@ -185,11 +294,12 @@ func CheckProgramLinkSuccess(programID ProgramID){
 		// Fetch log data (put it in log)
 		gl.GetShaderInfoLog(uint32(programID), logLength, nil, gl.Str(log))
 
-		panic("failed to link program: \n" + log)
-	}	
+		return errors.New("failed to link program: \n" + log)
+	}
+	return nil	
 }
 
-func CheckShaderCompileSuccess(shaderID ShaderID, shaderSource string) {
+func CheckShaderCompileSuccess(shaderID ShaderID, shaderSource string) error{
 	var success int32
 	gl.GetShaderiv(uint32(shaderID), gl.COMPILE_STATUS, &success)
 	if success == gl.FALSE {
@@ -203,11 +313,13 @@ func CheckShaderCompileSuccess(shaderID ShaderID, shaderSource string) {
 		// Fetch log data (put it in log)
 		gl.GetShaderInfoLog(uint32(shaderID), logLength, nil, gl.Str(log))
 
-		panic("failed to compile " + shaderSource + ", " + log)
+		return errors.New("failed to compile " + shaderSource + ", " + log)
 	}
+	return nil
 }
 
 // [/ Status checkers ]
+// ------------------------------------------------------------------------------------------
 // [ Type-Aware Wrappers ]
 
 func AttachShader(programID ProgramID, shaderID ShaderID){
@@ -219,7 +331,7 @@ func LinkProgram(programID ProgramID) {
 }
 
 // [/ Type-Aware Wrappers ]
-
+// ------------------------------------------------------------------------------------------
 // [ Log functions ]
 func GetVersion() string {
 	return gl.GoStr(gl.GetString(gl.VERSION))
@@ -237,3 +349,74 @@ func UseProgram(programID ProgramID) {
 	gl.UseProgram(uint32(programID))
 }
 // [/ Log functions ]
+// ------------------------------------------------------------------------------------------
+// [ Hotloading Shaders ]
+
+func LoadShader(path string, shaderType uint32) (ShaderID, error){
+	shaderFileData, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+
+	shaderFileStr := string(shaderFileData)
+	shaderID, err := MakeShader(shaderFileStr, shaderType)
+	if err != nil {
+		return 0, err
+	}
+
+	// Add to watchlist if not yet a member
+	if shaderIsInWatchList(path) == false {
+		// Get Last Modified time
+		file, err := os.Stat(path)
+		if err != nil {
+			panic(err)
+		}
+		// Add to list
+		shaderFileInfo := ShaderFileInfo{
+			FilePath: path,
+			LastModified: file.ModTime(),
+		}
+		LoadedShaders = append(LoadedShaders, shaderFileInfo)
+	}
+
+	return shaderID, nil
+}
+
+func shaderIsInWatchList(path string) bool {
+	for _, shaderFileInfo := range LoadedShaders {
+		if shaderFileInfo.FilePath == path {
+			return true
+		}
+	}
+	return false
+}
+
+func programIsInWatchList(programName string) bool {
+	for i := range LoadedPrograms {
+		if LoadedPrograms[i].ProgramName == programName {
+			return true
+		}
+	}
+	return false
+}
+
+func GetChangedShaderFiles() []string{
+	changedFiles := []string{}
+	for i := range LoadedShaders {
+		file, err := os.Stat(LoadedShaders[i].FilePath)
+		if err != nil {
+			panic(err)
+		}
+		// Check if the file has been changed since last import
+		changed := !file.ModTime().Equal(LoadedShaders[i].LastModified)
+		if changed {
+			log.Printf("Shader %s has changed! \n", LoadedShaders[i].FilePath)
+			// Update LastModified time
+			LoadedShaders[i].LastModified = file.ModTime()
+			// Add to output
+			changedFiles = append(changedFiles, LoadedShaders[i].FilePath)
+		}
+	}
+
+	return changedFiles
+}
