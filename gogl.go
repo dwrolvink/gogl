@@ -34,6 +34,7 @@ type Program struct {
 
 type ShaderID uint32
 type ProgramID uint32
+
 type VAOID uint32
 type VBOID uint32
 
@@ -181,6 +182,10 @@ func MakeShader(shaderSourceCode string, shaderType uint32) (ShaderID, error) {
 	return ShaderID(shaderId), nil
 }
 
+/* Creates a Program, builds shaders, links shaders, and adds program 
+   to custom watchlist "LoadedPrograms", which allows us to use ReloadProgram()
+   when one of the shaderfiles get modified.
+*/
 func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath string) (ProgramID, error) {
 	// Create shaders
 	vertexShaderID, err := LoadShader(vertexShaderPath, gl.VERTEX_SHADER)
@@ -191,7 +196,7 @@ func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath
 	fragmentShaderID, err2 := LoadShader(fragmentShaderPath, gl.FRAGMENT_SHADER)
 	if err2 != nil {
 		log.Println(err2)
-		return 0, err
+		return 0, err2
 	}
 
 	// Create program & link shaders
@@ -221,7 +226,7 @@ func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath
 		})
 	}
 
-	log.Println("Program " + programName + " compiled succesfully.")
+	log.Printf("Program %s (%d) compiled succesfully. \n", programName, programID)
 
 	return programID, nil
 }
@@ -254,7 +259,7 @@ func ReloadProgram(programName string, changedShaderFiles []string) (ProgramID, 
 	for i := range changedShaderFiles {
 		if changedShaderFiles[i] == vertexShaderPath || changedShaderFiles[i] == fragmentShaderPath {
 			needsRebuilding = true
-			log.Println("Program " + programName + " needs rebuiding")
+			log.Printf("Program %s (%d) needs rebuiding", programName, currentProgramID)
 			break
 		}
 	}
@@ -264,7 +269,8 @@ func ReloadProgram(programName string, changedShaderFiles []string) (ProgramID, 
 		var err error
 		newProgramID, err = MakeProgram(programName, vertexShaderPath, fragmentShaderPath)
 		if err != nil {
-			return 0, err
+			log.Printf("Failed to build program %s, continuing to use old compilation (%d). \n", programName, currentProgramID)
+			return currentProgramID, err
 		}
 
 		// Update programID in watchlist
