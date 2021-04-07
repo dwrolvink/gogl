@@ -8,35 +8,14 @@ import (
 	//"path/filepath"
 	"io/ioutil"
 	"errors"
-	"time"
 
 	"github.com/go-gl/gl/v4.5-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 )
 
-var (
-	// Watch list for hotloading shaders
-	LoadedShaders []ShaderFileInfo
-	LoadedPrograms = make(map[string]*Program)
-)
 
-type ShaderFileInfo struct {
-	FilePath string
-	LastModified time.Time
-}
 
-type Program struct {
-	ID ProgramID
-	ProgramName string
-	VertexShaderFilePath string
-	FragmentShaderFilePath string
-}
 
-type ShaderID uint32
-type ProgramID uint32
-
-type VAOID uint32
-type VBOID uint32
 
 // ------------------------------------------------------------------------------------------
 // [ Init functions ]
@@ -232,41 +211,7 @@ func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath
 	return LoadedPrograms[programName], nil
 }
 
-/* Hotloading shader interface for program */
-func ReloadProgram(programName string, storedProgramPtr *Program, changedShaderFiles []string) error{
 
-	// Check if any changed files are related to our program
-	needsRebuilding := false
-	for i := range changedShaderFiles {
-		if changedShaderFiles[i] == (*storedProgramPtr).VertexShaderFilePath || 
-		   changedShaderFiles[i] == (*storedProgramPtr).FragmentShaderFilePath {
-			needsRebuilding = true
-			log.Printf("Program %s (%d) needs rebuiding", programName, (*storedProgramPtr).ID)
-			break
-		}
-	}
-
-	// Rebuild
-	if needsRebuilding {
-		// Save old id, so we can remove the old program when the new one is compiled
-		oldProgramID := (*storedProgramPtr).ID
-
-		// Try make a new program (this will update the ProgramID in the current struct)
-		// So we start using it immediately if the compilation succeeds
-		_, err := MakeProgram(programName, (*storedProgramPtr).VertexShaderFilePath, (*storedProgramPtr).FragmentShaderFilePath)
-		if err != nil {
-			// Handle error, and continue using old program
-			log.Printf("Failed to build program %s, continuing to use old compilation (%d). \n", programName, (*storedProgramPtr).ID)
-			return err
-		}
-
-		// Remove old program
-		gl.DeleteProgram(uint32(oldProgramID))
-	}
-
-	// Done
-	return nil
-}
 
 // [/ Makers ]
 // ------------------------------------------------------------------------------------------
@@ -374,32 +319,3 @@ func LoadShader(path string, shaderType uint32) (ShaderID, error){
 	return shaderID, nil
 }
 
-func shaderIsInWatchList(path string) bool {
-	for _, shaderFileInfo := range LoadedShaders {
-		if shaderFileInfo.FilePath == path {
-			return true
-		}
-	}
-	return false
-}
-
-func GetChangedShaderFiles() []string{
-	changedFiles := []string{}
-	for i := range LoadedShaders {
-		file, err := os.Stat(LoadedShaders[i].FilePath)
-		if err != nil {
-			panic(err)
-		}
-		// Check if the file has been changed since last import
-		changed := !file.ModTime().Equal(LoadedShaders[i].LastModified)
-		if changed {
-			log.Printf("Shader %s has changed! \n", LoadedShaders[i].FilePath)
-			// Update LastModified time
-			LoadedShaders[i].LastModified = file.ModTime()
-			// Add to output
-			changedFiles = append(changedFiles, LoadedShaders[i].FilePath)
-		}
-	}
-
-	return changedFiles
-}
