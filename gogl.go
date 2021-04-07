@@ -17,7 +17,7 @@ import (
 var (
 	// Watch list for hotloading shaders
 	LoadedShaders []ShaderFileInfo
-	LoadedPrograms []Program
+	LoadedPrograms = make(map[string]*Program)
 )
 
 type ShaderFileInfo struct {
@@ -83,7 +83,7 @@ func InitGlfw(windowTitle string, width, height int) *glfw.Window {
 // ------------------------------------------------------------------------------------------
 // [ Main functions ]
 
-func Draw(window *glfw.Window, programID ProgramID, data []float32, dataType uint32) {
+func Draw(window *glfw.Window, programPtr *Program, data []float32, dataType uint32) {
 	// dataType: gl.TRIANGLES
 
 	vaoID, _ := MakeVao(data)		// Recalc vao
@@ -92,7 +92,7 @@ func Draw(window *glfw.Window, programID ProgramID, data []float32, dataType uin
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
 	// Activate program
-	UseProgram(programID)
+	UseProgram((*programPtr).ID)
 
 	// Compile image
 	gl.BindVertexArray(uint32(vaoID))
@@ -186,17 +186,15 @@ func MakeShader(shaderSourceCode string, shaderType uint32) (ShaderID, error) {
    to custom watchlist "LoadedPrograms", which allows us to use ReloadProgram()
    when one of the shaderfiles get modified.
 */
-func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath string) (ProgramID, error) {
+func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath string) (*Program, error) {
 	// Create shaders
 	vertexShaderID, err := LoadShader(vertexShaderPath, gl.VERTEX_SHADER)
 	if err != nil {
-		log.Println(err)
-		return 0, err
+		return nil, err
 	}
 	fragmentShaderID, err2 := LoadShader(fragmentShaderPath, gl.FRAGMENT_SHADER)
 	if err2 != nil {
-		log.Println(err2)
-		return 0, err2
+		return nil, err2
 	}
 
 	// Create program & link shaders
@@ -215,71 +213,59 @@ func MakeProgram(programName string, vertexShaderPath string, fragmentShaderPath
 	gl.DeleteShader(uint32(vertexShaderID))
 	gl.DeleteShader(uint32(fragmentShaderID))
 
-	// Add program to watchlist so we can recreate it when one of the shaders
-	// needs to be recompiled
-	if programIsInWatchList(programName) == false {
-		LoadedPrograms = append(LoadedPrograms, Program{
+	// Keep track of the program in a watchlist, so we can update it when the shaders change
+	programPtr, ok := LoadedPrograms[programName] 
+	if ok == false {
+		// Add to the list
+		LoadedPrograms[programName] = &Program {
 			ID: programID,
-			ProgramName: programName,
 			VertexShaderFilePath: vertexShaderPath,
 			FragmentShaderFilePath: fragmentShaderPath,
-		})
+		}
+	} else {
+		// If it already exists, update the id
+		(*programPtr).ID = programID
 	}
 
 	log.Printf("Program %s (%d) compiled succesfully. \n", programName, programID)
 
-	return programID, nil
+	return LoadedPrograms[programName], nil
 }
 
 /* Hotloading shader interface for program */
-func ReloadProgram(programName string, changedShaderFiles []string) (ProgramID, error){
-	var currentProgramID ProgramID
-	var newProgramID ProgramID
-	var vertexShaderPath, fragmentShaderPath string
-	
-	// Find stored Program definition, and fetch shader file names
-	programFound := false
-	programIndex := 0
-	for i := range LoadedPrograms {
-		if LoadedPrograms[i].ProgramName == programName {
-			programName        = LoadedPrograms[i].ProgramName
-			currentProgramID   = LoadedPrograms[i].ID
-			vertexShaderPath   = LoadedPrograms[i].VertexShaderFilePath
-			fragmentShaderPath = LoadedPrograms[i].FragmentShaderFilePath
-			programFound       = true
-			programIndex       = i
-		}
-	}
-	if programFound == false {
-		return 0, errors.New("Could not find program " + programName)
-	}
+func ReloadProgram(programName string, storedProgramPtr *Program, changedShaderFiles []string) error{
 
 	// Check if any changed files are related to our program
 	needsRebuilding := false
 	for i := range changedShaderFiles {
-		if changedShaderFiles[i] == vertexShaderPath || changedShaderFiles[i] == fragmentShaderPath {
+		if changedShaderFiles[i] == (*storedProgramPtr).VertexShaderFilePath || 
+		   changedShaderFiles[i] == (*storedProgramPtr).FragmentShaderFilePath {
 			needsRebuilding = true
-			log.Printf("Program %s (%d) needs rebuiding", programName, currentProgramID)
+			log.Printf("Program %s (%d) needs rebuiding", programName, (*storedProgramPtr).ID)
 			break
 		}
 	}
 
 	// Rebuild
 	if needsRebuilding {
-		var err error
-		newProgramID, err = MakeProgram(programName, vertexShaderPath, fragmentShaderPath)
+		// Save old id, so we can remove the old program when the new one is compiled
+		oldProgramID := (*storedProgramPtr).ID
+
+		// Try make a new program (this will update the ProgramID in the current struct)
+		// So we start using it immediately if the compilation succeeds
+		_, err := MakeProgram(programName, (*storedProgramPtr).VertexShaderFilePath, (*storedProgramPtr).FragmentShaderFilePath)
 		if err != nil {
-			log.Printf("Failed to build program %s, continuing to use old compilation (%d). \n", programName, currentProgramID)
-			return currentProgramID, err
+			// Handle error, and continue using old program
+			log.Printf("Failed to build program %s, continuing to use old compilation (%d). \n", programName, (*storedProgramPtr).ID)
+			return err
 		}
 
-		// Update programID in watchlist
-		LoadedPrograms[programIndex].ID = newProgramID
-		return newProgramID, nil
+		// Remove old program
+		gl.DeleteProgram(uint32(oldProgramID))
 	}
 
-	// Nothing has changed, return current ID
-	return currentProgramID, nil
+	// Done
+	return nil
 }
 
 // [/ Makers ]
@@ -391,15 +377,6 @@ func LoadShader(path string, shaderType uint32) (ShaderID, error){
 func shaderIsInWatchList(path string) bool {
 	for _, shaderFileInfo := range LoadedShaders {
 		if shaderFileInfo.FilePath == path {
-			return true
-		}
-	}
-	return false
-}
-
-func programIsInWatchList(programName string) bool {
-	for i := range LoadedPrograms {
-		if LoadedPrograms[i].ProgramName == programName {
 			return true
 		}
 	}
