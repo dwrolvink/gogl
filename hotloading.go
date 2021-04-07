@@ -1,5 +1,22 @@
 package gogl
 
+/*	
+	HOTLOADING
+
+	This file stores all the code that is used exclusively for hotloading shaders.
+	This means that we can change the shader definitions while the program is running, 
+	and it will load them in upon saving - without the need of recompiling the entire
+	program.
+
+	When the compilation of one or more of the shaders fails, the programs using them will 
+	continue running on the previous shader compilations. An error will be logged in the
+	terminal.
+
+	Note that the other code in gogl.go (like MakeProgram()) also uses components from this 
+	file; notably to register newly created Programs and shader files, so that they are 
+	automatically tracked and updated upon change.
+*/
+
 import (
 	"time"
 	"os"
@@ -19,6 +36,7 @@ type ShaderFileInfo struct {
 	LastModified time.Time
 }
 
+// <toplevel function>
 func HotloadShaders(){
 	// Check all shader files for changes (by LastModified date)
 	// This will update LastModified in LoadedShaders for each
@@ -75,16 +93,6 @@ func ReloadProgram(programName string, storedProgramPtr *Program, changedShaderF
 	return nil
 }
 
-
-func shaderIsInWatchList(path string) bool {
-	for _, shaderFileInfo := range LoadedShaders {
-		if shaderFileInfo.FilePath == path {
-			return true
-		}
-	}
-	return false
-}
-
 func GetChangedShaderFiles() []string{
 	changedFiles := []string{}
 	for i := range LoadedShaders {
@@ -102,6 +110,16 @@ func GetChangedShaderFiles() []string{
 			changedFiles = append(changedFiles, LoadedShaders[i].FilePath)
 		}
 	}
-
 	return changedFiles
+}
+
+// Used to check if MakeShader() should add the path of the shader
+// to the watchlist, or whether it is already present.
+func shaderIsInWatchList(path string) bool {
+	for _, shaderFileInfo := range LoadedShaders {
+		if shaderFileInfo.FilePath == path {
+			return true
+		}
+	}
+	return false
 }
