@@ -20,6 +20,7 @@ package gogl
 import (
 	"time"
 	"os"
+	"io/ioutil"
 	"log"
 	"github.com/go-gl/gl/v4.5-core/gl"
 )
@@ -111,6 +112,36 @@ func GetChangedShaderFiles() []string{
 		}
 	}
 	return changedFiles
+}
+
+func LoadShader(path string, shaderType uint32) (ShaderID, error){
+	shaderFileData, err := ioutil.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+
+	shaderFileStr := string(shaderFileData)
+	shaderID, err := MakeShader(shaderFileStr, shaderType)
+	if err != nil {
+		return 0, err
+	}
+
+	// Add to watchlist if not yet a member
+	if shaderIsInWatchList(path) == false {
+		// Get Last Modified time
+		file, err := os.Stat(path)
+		if err != nil {
+			panic(err)
+		}
+		// Add to list
+		shaderFileInfo := ShaderFileInfo{
+			FilePath: path,
+			LastModified: file.ModTime(),
+		}
+		LoadedShaders = append(LoadedShaders, shaderFileInfo)
+	}
+
+	return shaderID, nil
 }
 
 // Used to check if MakeShader() should add the path of the shader

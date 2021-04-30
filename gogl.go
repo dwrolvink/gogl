@@ -1,20 +1,17 @@
 package gogl
 
 import (
-	"os"
+
 	"log"
 	"strings"
 	"runtime"
 	//"path/filepath"
-	"io/ioutil"
+	
 	"errors"
 
 	"github.com/go-gl/gl/v4.5-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 )
-
-
-
 
 
 // ------------------------------------------------------------------------------------------
@@ -62,10 +59,10 @@ func InitGlfw(windowTitle string, width, height int) *glfw.Window {
 // ------------------------------------------------------------------------------------------
 // [ Main functions ]
 
-func Draw(window *glfw.Window, programPtr *Program, data []float32, dataType uint32) {
+func Draw(window *glfw.Window, programPtr *Program, data []float32, dataType uint32, stride int32) {
 	// dataType: gl.TRIANGLES
 
-	vaoID, _ := MakeVao(data)		// Recalc vao
+	vaoID, _ := MakeVao(data, stride)		// Recalc vao
 
 	// Clear buffer
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
@@ -88,7 +85,9 @@ func Draw(window *glfw.Window, programPtr *Program, data []float32, dataType uin
 // ------------------------------------------------------------------------------------------
 // [ Makers ]
 
-func MakeVao(data []float32) (VAOID, VBOID) {
+func MakeVao(data []float32, stride int32) (VAOID, VBOID) {
+	// stride: 0 for triangle data, 5*4 for quad?
+
 	// Create Buffer object
 	vboID := GenBindBuffer(gl.ARRAY_BUFFER)
 
@@ -99,7 +98,7 @@ func MakeVao(data []float32) (VAOID, VBOID) {
 	vaoID := GenBindVertexArray()
 
 	// Configure VAO
-	gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 0, nil)
+	gl.VertexAttribPointer(0, 3, gl.FLOAT, false, stride, nil)
 	gl.EnableVertexAttribArray(0)
 
 	// Unbind 
@@ -108,11 +107,18 @@ func MakeVao(data []float32) (VAOID, VBOID) {
 	return VAOID(vaoID), VBOID(vboID)
 }
 
+// Used when using quads in vertice array
+func GenEBO() EBOID {
+	var EBO uint32
+	gl.GenBuffers(1, &EBO)
+	return EBOID(EBO)
+}
+
 func GenBindBuffer(target uint32) VBOID {
 	// target: gl.ARRAY_BUFFER
 	var vboID uint32
 	gl.GenBuffers(1, &vboID)
-	gl.BindBuffer(gl.ARRAY_BUFFER, vboID)
+	gl.BindBuffer(target, vboID)
 
 	return VBOID(vboID)
 }
@@ -129,6 +135,12 @@ func UnbindVertexArray() {
 }
 
 func BufferData(data []float32, target uint32, usage uint32) {
+	// target: gl.ARRAY_BUFFER
+	// usage: gl.STATIC_DRAW
+	gl.BufferData(target, 4*len(data), gl.Ptr(data), usage)
+}
+
+func BufferDataInt(data []uint32, target uint32, usage uint32) {
 	// target: gl.ARRAY_BUFFER
 	// usage: gl.STATIC_DRAW
 	gl.BufferData(target, 4*len(data), gl.Ptr(data), usage)
@@ -287,35 +299,3 @@ func UseProgram(programID ProgramID) {
 }
 // [/ Log functions ]
 // ------------------------------------------------------------------------------------------
-// [ Hotloading Shaders ]
-
-func LoadShader(path string, shaderType uint32) (ShaderID, error){
-	shaderFileData, err := ioutil.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-
-	shaderFileStr := string(shaderFileData)
-	shaderID, err := MakeShader(shaderFileStr, shaderType)
-	if err != nil {
-		return 0, err
-	}
-
-	// Add to watchlist if not yet a member
-	if shaderIsInWatchList(path) == false {
-		// Get Last Modified time
-		file, err := os.Stat(path)
-		if err != nil {
-			panic(err)
-		}
-		// Add to list
-		shaderFileInfo := ShaderFileInfo{
-			FilePath: path,
-			LastModified: file.ModTime(),
-		}
-		LoadedShaders = append(LoadedShaders, shaderFileInfo)
-	}
-
-	return shaderID, nil
-}
-

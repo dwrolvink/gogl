@@ -13,15 +13,15 @@ package gogl
 	as intended (if one is thorough).
 */
 
-type Program struct {
-	ID ProgramID
-	ProgramName string
-	VertexShaderFilePath string
-	FragmentShaderFilePath string
-}
-
 type ShaderID uint32
-type ProgramID uint32
 
-type VAOID uint32
-type VBOID uint32
+type VAOID uint32	// Vertex Array Object
+type VBOID uint32	// Vertex Buffer Object
+type EBOID uint32	// Element Buffer Object
+
+// Datatypes, used when setting DataObject (see program.go)
+const (
+	GOGL_TRIANGLES = 0
+	GOGL_QUADS = 1
+)
+
