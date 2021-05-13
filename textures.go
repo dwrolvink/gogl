@@ -12,8 +12,7 @@ import (
 
 type TextureID uint32
 
-func LoadImageToTexture(filename string) TextureID {
-
+func LoadPixelDataFromImage(filename string) (*[]byte, [2]int) {
 	file, err := os.Open(filename)
 	if err != nil {
 		panic(err)
@@ -45,6 +44,13 @@ func LoadImageToTexture(filename string) TextureID {
 		}
 	}
 
+	return &pixels, [2]int{w, h}
+}
+
+func LoadImageToTexture(filename string) TextureID {
+
+	pixels, dimensions := LoadPixelDataFromImage(filename)
+
 	texId := GenTexture()
 	BindTexture(texId)
 	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT)
@@ -53,7 +59,7 @@ func LoadImageToTexture(filename string) TextureID {
 
 	// Load image in texture
 	// target, level, colormode, width, heigth, border, format, xtype, *pixels
-	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, int32(w), int32(h), 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(pixels))
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, int32(dimensions[0]), int32(dimensions[1]), 0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(*pixels))
 
 	// Prerender smaller versions of texture at runtime for performance reasons
 	gl.GenerateMipmap(gl.TEXTURE_2D)
