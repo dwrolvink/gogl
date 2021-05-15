@@ -77,12 +77,12 @@ func (data *DataObject) Enable() {
 		// - x,y,z data starts at index 0, and is 3 values long (0,3)
 		// - Each vertex is 5 values long, and a float32 is 4 bytes long, so
 		//   the stride is 5*4
-		gl.VertexAttribPointer(0, 3, gl.FLOAT, false, 5*4, nil)
+		gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 4*4, nil)
 		gl.EnableVertexAttribArray(0)
 
 		// - texcoord is two values long (2), and starts at index 3 (gl.PtrOffset(3*4))
 		// - this is the second attribpointer (1), non-normalized data (false)
-		gl.VertexAttribPointer(1, 2, gl.FLOAT, false, 5*4, gl.PtrOffset(3*4))
+		gl.VertexAttribPointer(1, 2, gl.FLOAT, false, 4*4, gl.PtrOffset(2*4))
 		gl.EnableVertexAttribArray(1)
 
 	} else if data.Type == GOGL_TRIANGLES {
