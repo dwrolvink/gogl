@@ -21,6 +21,13 @@ func (program *Program) SetFloat(name string, value float32) {
 	gl.Uniform1f(location, value)
 }
 
+// Loads the given value as a Uniform2fv uniform to be consumed by a shader
+func (program *Program) SetFloatVector2(name string, value *[2]float32) {
+	name_cstr := gl.Str(name + "\x00")
+	location := gl.GetUniformLocation(uint32(program.ID), name_cstr)
+	gl.Uniform2f(location, (*value)[0], (*value)[1])
+}
+
 // Loads the given value as a Uniform1f uniform to be consumed by a shader
 func (program *Program) SetInt(name string, value int32) {
 	name_cstr := gl.Str(name + "\x00")
